@@ -1,8 +1,12 @@
 import requests
 import pandas as pd
+import os
+from dotenv import load_dotenv
 
-# Replace 'YOUR_ACCESS_TOKEN' with your actual GitHub personal access token
-access_token = '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'
+# Load environment variables from .env file
+load_dotenv()
+
+access_token = os.getenv("GITHUB_ACCESS_TOKEN")
 
 # Define the desired fields and subfields
 desired_fields = [

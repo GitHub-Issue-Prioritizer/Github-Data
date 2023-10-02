@@ -1,5 +1,10 @@
 import requests
 import pandas as pd
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # GitHub API endpoint for issues in the repository of your choice
 repo_owner = 'kubernetes'  # Replace with the repository owner's username or organization name
@@ -7,7 +12,7 @@ repo_name = 'kubernetes'    # Replace with the name of the repository
 api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
 
 # Replace with your GitHub personal access token
-token = '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'
+token = os.getenv("GITHUB_ACCESS_TOKEN")
 
 headers = {
    'Authorization': f'token {token}'

@@ -1,8 +1,12 @@
 import requests
 import pandas as pd
+import os
+from dotenv import load_dotenv
 
-# Replace 'YOUR_ACCESS_TOKEN' with your actual GitHub personal access token
-access_token = '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'
+# Load environment variables from .env file
+load_dotenv()
+
+access_token = os.getenv("GITHUB_ACCESS_TOKEN")
 
 # Define the desired fields and subfields
 desired_fields = [
@@ -78,7 +82,6 @@ if __name__ == "__main__":
     repo_name = 'flutter'
     closed_issues = fetch_issues(repo_owner, repo_name)
 
-    # Create a DataFrame from the retrieved closed issues
     df = pd.DataFrame(closed_issues)
 
     # Export the DataFrame to an Excel file
