@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 
 # Replace 'YOUR_ACCESS_TOKEN' with your actual GitHub personal access token
-access_token = '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'
+access_token = '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'
 
 # Define the desired fields and subfields
 desired_fields = [
@@ -25,7 +25,7 @@ def extract_subfields(issue):
         'label_count': len(issue['labels'])
     }
 
-def fetch_issues(repo_owner, repo_name, state='closed', per_page=100):
+def fetch_issues(repo_owner, repo_name, state='open', per_page=100):
     base_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
     params = {
         'state': state,
@@ -57,10 +57,10 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100):
                 issues.append(data)
                 issues_saved += 1  # Increment the count for each issue saved
 
-                if issues_saved == 2000:
+                if issues_saved == 5000:
                     break  # Stop fetching after 5000 issues
 
-            if 'rel="next"' not in response.headers.get('Link', '') or issues_saved == 2000:
+            if 'rel="next"' not in response.headers.get('Link', '') or issues_saved == 5000:
                 break  # No more pages to fetch or reached 5000 issues
             params['page'] += 1
 
@@ -74,15 +74,15 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100):
     return issues
 
 if __name__ == "__main__":
-    repo_owner = 'opencv'
-    repo_name = 'opencv'
+    repo_owner = 'flutter'
+    repo_name = 'flutter'
     closed_issues = fetch_issues(repo_owner, repo_name)
 
     # Create a DataFrame from the retrieved closed issues
     df = pd.DataFrame(closed_issues)
 
     # Export the DataFrame to an Excel file
-    excel_file = 'CLOSED_opencv_issues.xlsx'
+    excel_file = 'CLOSED_flutter_issues.xlsx'
     df.to_excel(excel_file, index=False)
 
     print(f"Total closed issues: {len(closed_issues)}")
