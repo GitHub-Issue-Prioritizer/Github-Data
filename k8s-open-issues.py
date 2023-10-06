@@ -90,11 +90,11 @@ issues_data_filtered = [{field: issue[field] for field in desired_fields} for is
 df = pd.DataFrame(issues_data_filtered)
 
 # Save the DataFrame to an Excel file (XLSX)
-df.to_excel('k8s_github_open_issues.xlsx', index=False)
+df.to_excel('k8s_open_issues.xlsx', index=False)
 
 
 # Save the DataFrame to an Excel file (XLSX) and append to the existing file
 # with pd.ExcelWriter('k8s_github_issues.xlsx', engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
 #     df.to_excel(writer, index=False, sheet_name='Sheet1', header=True)  # Append data to the existing sheet
 
-print(f'Data saved to k8s_github_open_issues.xlsx')
+print(f'Data saved to k8s_open_issues.xlsx')
