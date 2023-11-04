@@ -1,9 +1,10 @@
-from statistics import median
 import requests
 import pandas as pd
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+import re
+import statistics
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,10 +28,14 @@ desired_fields = [
     'Top_label_1',  # New column for label 1 encoding
     'Top_label_2',  # New column for label 2 encoding
     'Top_label_3',  # New column for label 3 encoding
-    'high_priority_label',  # New column for high priority label
-    'medium_priority_label',  # New column for medium priority label
-    'low_priority_label'  # New column for low priority label
+    'priority'  # New column for consolidated priority levels (1 for high, 2 for normal, 3 for low)
 ]
+
+def clean_data(data):
+    illegal_char_pattern = re.compile(r'\W')
+    for key in data:
+        if isinstance(data[key], str):
+            data[key] = illegal_char_pattern.sub(' ', data[key])
 
 def extract_subfields(issue):
     return {
@@ -45,15 +50,16 @@ def has_associated_pull_request(issue):
 
 def calculate_comment_priority(issues):
     comment_counts = [issue['comments'] for issue in issues]
-    median_comments = median(comment_counts)
-
+    if not comment_counts:
+        return
+    median_comments = statistics.median(comment_counts)
     for issue in issues:
         if issue['comments'] > median_comments:
-            issue['comment_priority'] = 'high'
+            issue['comment_priority'] = 1
         elif issue['comments'] == median_comments:
-            issue['comment_priority'] = 'medium'
+            issue['comment_priority'] = 2
         else:
-            issue['comment_priority'] = 'low'
+            issue['comment_priority'] = 3
 
 def calculate_top_labels(issues):
     label_counts = {}
@@ -71,46 +77,28 @@ def calculate_top_labels(issues):
         for i, label in enumerate(top_labels):
             issue[f'Top_label_{i+1}'] = 1 if label in issue['label_names'] else 0
 
-def label_encode_priority(issues):
+def consolidate_priority(issues, label_mapping, include_priority_labels):
+    filtered_issues = []
     for issue in issues:
-        title = issue['title'].lower()
+        labels = [label for label in issue['label_names']]
+        has_priority_label = any(label in labels for label in include_priority_labels)
+        if has_priority_label:
+            for priority, label_categories in label_mapping.items():
+                if any(label in labels for label in label_categories):
+                    issue['priority'] = priority
+                    filtered_issues.append(issue)
+                    break
+    return filtered_issues
 
-        high_priority_keywords = [
-            'priority: p0', 'priority 0', 'priority: p1', 'priority 1',
-            'critical', 'criticalpriority', 'priority-critical',
-            'critical priority', 'priority:critical', 'priority critical',
-            'priority: critical', 'priority - critical', 'critical-priority',
-            'priority/critical', 'urgent', 'priority/urgent',
-            'priority/blocker', 'priority: blocker', 'highpriority',
-            'priority-high', 'high priority', 'priority:high',
-            'priority high', 'priority: high', 'priority - high',
-            'high-priority', 'priority/high', 'is:priority'
-        ]
-
-        medium_priority_keywords = ['priority: p2', 'p2']
-
-        low_priority_keywords = [
-            'priority: p3', 'priority 3', 'priority: p4', 'p4',
-            'priority 4', 'priority: minor', 'lowpriority',
-            'priority-low', 'low priority', 'priority:low',
-            'priority low', 'priority: low', 'priority - low',
-            'low-priority', 'priority/low', 'is:no-priority'
-        ]
-
-        issue['high_priority_label'] = any(keyword in title for keyword in high_priority_keywords)
-        issue['medium_priority_label'] = any(keyword in title for keyword in medium_priority_keywords)
-        issue['low_priority_label'] = any(keyword in title for keyword in low_priority_keywords)
-
-def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues=5000):
+def fetch_issues(repo_owner, repo_name, state='all', per_page=100, max_issues=5000):
     base_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
-    # start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
     params = {
         'state': state,
         'per_page': per_page,
         'page': 1
     }
     headers = {
-        'Authorization': f'token {access_token}'  # Include your access token
+        'Authorization': f'token {access_token}'
     }
     issues = []
     issues_saved = 0
@@ -141,7 +129,7 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues
                     print(f"Saved {issues_saved} issues so far.")
 
                 if 'rel="next"' not in response.headers.get('Link', '') or issues_saved == max_issues:
-                    break  # No more pages to fetch or reached the desired number of issues
+                    break
             params['page'] += 1
         else:
             print(f"Failed to retrieve issues. Status code: {response.status_code}")
@@ -149,25 +137,60 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues
 
     calculate_comment_priority(issues)
     calculate_top_labels(issues)
-    label_encode_priority(issues)
-
-    # Filter issues with assignee_count > 0, label_count > 0, and closed issues with PR association.
-    issues = [issue for issue in issues if issue['label_count'] > 0 and issue['pr_associated'] in [0, 1]]
-
     return issues
 
 if __name__ == "__main__":
-    repo_owner = 'facebook'
-    repo_name = 'react-native'
-    max_issues = 5000
-    closed_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues)
+    include_priority_labels = [
+        'priority-1','priority-2','priority-3',
+        'p0','p1','p2','p3',
+        'p4'
 
-    # Create a DataFrame from the retrieved closed issues
-    df = pd.DataFrame(closed_issues)
+    ]   
+    repos = [
+    
+        # ('azure','azure-powershell',['P0','P1','P2']),
+        # ('OData','WebApi',['P1','P2','P3']),
+        # ('GoogleChrome','lighthouse',['P1','P1.5','P2','P3']),
+        # ('desktop','desktop',['priority-1','priority-2','priority-3']),
+        # ('aws','aws-cli',['p0','p1','p2','p3']),
+        # ('aws-amplify','amplify-js',['p0','p1','p2','p3','p4']),
+        # ('aws-amplify','amplify-cli',['p0','p1','p2','p3','p4']),
+        # ('boto','boto3',['p0','p1','p2','p3']),
+        ('aws','aws-sdk-go',['p0','p1','p2','p3']),
+        ('aws','aws-sdk-js',['p0','p1','p2','p3']),
+    ]
 
-    # Export the DataFrame to an Excel file
-    excel_file = 'closed_issues_modified.xlsx'
+    max_issues_per_repo = 4000
+    combined_issues = []
+
+    label_mapping = {
+          1: [
+            'priority-1', #1
+            'p0','p1'
+        ],
+        2: [
+            'priority-2', #1
+            'p2'
+        ],
+        3: [
+            'priority-3', #1
+            'p3',
+            'p4'
+
+        ]
+    }
+
+    for repo_owner, repo_name, labels in repos:
+        print(f"Fetching issues from {repo_owner}/{repo_name}")
+        fetched_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues_per_repo)
+        filtered_issues = consolidate_priority(fetched_issues, label_mapping, include_priority_labels)
+        combined_issues.extend(filtered_issues)
+        print(f"Fetched {len(filtered_issues)} issues from {repo_owner}/{repo_name}")
+
+    df = pd.DataFrame(combined_issues)
+
+    excel_file = 'extra8.xlsx'
     df.to_excel(excel_file, index=False)
 
-    print(f"Total closed issues: {len(closed_issues)}")
+    print(f"Total issues collected: {len(combined_issues)}")
     print(f"Data exported to {excel_file}")

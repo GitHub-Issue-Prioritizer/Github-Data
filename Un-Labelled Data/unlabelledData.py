@@ -4,7 +4,8 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 import re
-from statistics import median
+import statistics
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -49,15 +50,14 @@ def has_associated_pull_request(issue):
 
 def calculate_comment_priority(issues):
     comment_counts = [issue['comments'] for issue in issues]
-    median_comments = median(comment_counts)
-
+    median_comments = statistics.median(comment_counts)
     for issue in issues:
         if issue['comments'] > median_comments:
-            issue['comment_priority'] = 'high'
+            issue['comment_priority'] = 1
         elif issue['comments'] == median_comments:
-            issue['comment_priority'] = 'medium'
+            issue['comment_priority'] = 2
         else:
-            issue['comment_priority'] = 'low'
+            issue['comment_priority'] = 3
 
 def calculate_top_labels(issues):
     label_counts = {}
@@ -75,24 +75,13 @@ def calculate_top_labels(issues):
         for i, label in enumerate(top_labels):
             issue[f'Top_label_{i+1}'] = 1 if label in issue['label_names'] else 0
 
-def consolidate_priority(issues):
+def consolidate_priority(issues, label_mapping, include_priority_labels):
     for issue in issues:
-        labels = [label.lower() for label in issue['label_names']]
+        issue['priority'] = ''  # Set the "priority" field to an empty string for all issues
+    return issues
 
-        high_priority_labels = ['priority: high', 'urgent', 'critical']
-        medium_priority_labels = ['priority: normal', 'medium', 'normal']
-        low_priority_labels = ['priority: low', 'minor', 'low']
 
-        if any(label in labels for label in high_priority_labels):
-            issue['priority'] = 1
-        elif any(label in labels for label in medium_priority_labels):
-            issue['priority'] = 2
-        elif any(label in labels for label in low_priority_labels):
-            issue['priority'] = 3
-        else:
-            issue['priority'] = 3
-
-def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues=5000):
+def fetch_issues(repo_owner, repo_name, state='all', per_page=100, max_issues=5000):
     base_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
     params = {
         'state': state,
@@ -139,23 +128,83 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues
 
     calculate_comment_priority(issues)
     calculate_top_labels(issues)
-    consolidate_priority(issues)
-
-    for issue in issues:
-        clean_data(issue)
-
     return issues
 
 if __name__ == "__main__":
-    repo_owner = 'opencv'
-    repo_name = 'opencv'
-    max_issues = 5000
-    closed_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues)
+    include_priority_labels = [
+    'low impact', 'medium difficulty', 'medium effort', 'must have eventually', 'must have', 'nice to have', 'should have',
+    'high priority', 'medium priority', 'low priority',
+    'priority-0-high', 'priority-1-normal', 'priority-2-low',
+    'High Priority', 'Low Priority', 'Moderate',
+    'Priority: Critical', 'Priority: High','Priority:High','Priority: Medium','Priority:Medium', 'Priority: Low',
+    'P0', 'P1', 'P2', 'P3', 'P4', 'P5',
+    'priorirty: low', 'priority: important',
+    'priority::critical', 'priority::high', 'priority::medium', 'priority::low',
+    '🧹 p1-chore','🍰 p2-nice-to-have', '🔨 p3-minor-bug', '❗ p4-important', '🔥 p5-urgent',
+    '- P1: chore', '- P2: has workaround', '- P2: nice to have', '- P3: minor bug', '- P4: important', '- P5: urgent',
+    ]   
+    repos = [
+       ('facebook', 'react', [])
+    ]
 
-    df = pd.DataFrame(closed_issues)
+    max_issues_per_repo = 5000
+    combined_issues = []
 
-    excel_file = '1opencv_closed_issues_modified.xlsx'
+    label_mapping = {
+          1: [
+            'must have eventually', 'must have', 'should have', #1
+            'high priority', #2
+            'priority-0-high', #3
+            'High Priority', #4
+            'Priority: Critical','Priority: High','Priority:High' #5
+            'P0','P1', #6
+            'priority: important' #7
+            # 'priority::critical','priority::high' #8
+            'priority: high' #8
+            '❗ p4-important', '🔥 p5-urgent', #9
+            '- P4: important', '- P5: urgent', #10
+            #extra
+            'priority: high', 'urgent', 'critical',
+            
+        ],
+        2: [
+            'medium difficulty','medium effort','nice to have',#1
+            'medium priority', #2
+            'priority-1-normal', #3
+            'Moderate', #4
+            'Priority: Medium','Priority:Medium', #5
+            'P2','P3', #6
+            # 'priority::medium' #8
+            'priority: normal' #8
+            '🍰 p2-nice-to-have', #9
+            '- P2: nice to have', '- P3: minor bug', #10
+        ],
+        3: [
+            'low impact', #1
+            'low priority',#2
+            'priority-2-low', #3
+            'Low Priority' #4
+            'Priority: Low', #5
+            'P4','P5', #6
+            'priorirty: low' #7
+            # 'priority::low' #8
+            'priority: normal' #8
+            '🧹 p1-chore', '🔨 p3-minor-bug', #9
+            '- P1: chore', '- P2: has workaround', #10
+        ]
+    }
+
+    for repo_owner, repo_name, labels in repos:
+        print(f"Fetching issues from {repo_owner}/{repo_name}")
+        fetched_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues_per_repo)
+        filtered_issues = consolidate_priority(fetched_issues, label_mapping, include_priority_labels)
+        combined_issues.extend(filtered_issues)
+        print(f"Fetched {len(filtered_issues)} issues from {repo_owner}/{repo_name}")
+
+    df = pd.DataFrame(combined_issues)
+
+    excel_file = 'combined_closed_issues.xlsx'
     df.to_excel(excel_file, index=False)
 
-    print(f"Total closed issues: {len(closed_issues)}")
+    print(f"Total issues collected: {len(combined_issues)}")
     print(f"Data exported to {excel_file}")

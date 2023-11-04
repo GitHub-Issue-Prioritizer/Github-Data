@@ -1,10 +1,10 @@
-from statistics import median
 import requests
 import pandas as pd
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-import re  # Import the regular expression module
+import re
+import statistics
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,20 +28,14 @@ desired_fields = [
     'Top_label_1',  # New column for label 1 encoding
     'Top_label_2',  # New column for label 2 encoding
     'Top_label_3',  # New column for label 3 encoding
-    'high_priority_label',  # New column for high priority label
-    'medium_priority_label',  # New column for medium priority label
-    'low_priority_label'  # New column for low priority label
+    'priority'  # New column for consolidated priority levels (1 for high, 2 for normal, 3 for low)
 ]
 
-# Data cleaning function to remove illegal characters
 def clean_data(data):
-    # Define a pattern to match illegal characters (e.g., line breaks, carriage returns)
     illegal_char_pattern = re.compile(r'\W')
-
-    # Iterate through the data and remove or replace illegal characters
     for key in data:
         if isinstance(data[key], str):
-            data[key] = illegal_char_pattern.sub(' ', data[key])  # Replace with a space
+            data[key] = illegal_char_pattern.sub(' ', data[key])
 
 def extract_subfields(issue):
     return {
@@ -56,15 +50,14 @@ def has_associated_pull_request(issue):
 
 def calculate_comment_priority(issues):
     comment_counts = [issue['comments'] for issue in issues]
-    median_comments = median(comment_counts)
-
+    median_comments = statistics.median(comment_counts)
     for issue in issues:
         if issue['comments'] > median_comments:
-            issue['comment_priority'] = 'high'
+            issue['comment_priority'] = 1
         elif issue['comments'] == median_comments:
-            issue['comment_priority'] = 'medium'
+            issue['comment_priority'] = 2
         else:
-            issue['comment_priority'] = 'low'
+            issue['comment_priority'] = 3
 
 def calculate_top_labels(issues):
     label_counts = {}
@@ -82,29 +75,28 @@ def calculate_top_labels(issues):
         for i, label in enumerate(top_labels):
             issue[f'Top_label_{i+1}'] = 1 if label in issue['label_names'] else 0
 
-def label_encode_priority(issues):
+def consolidate_priority(issues, label_mapping, include_priority_labels):
+    filtered_issues = []
     for issue in issues:
-        labels = [label.lower() for label in issue['label_names']]
+        labels = [label for label in issue['label_names']]
+        has_priority_label = any(label in labels for label in include_priority_labels)
+        if has_priority_label:
+            for priority, label_categories in label_mapping.items():
+                if any(label in labels for label in label_categories):
+                    issue['priority'] = priority
+                    filtered_issues.append(issue)
+                    break
+    return filtered_issues
 
-        high_priority_labels = ['priority: high', 'urgent', 'critical']
-        medium_priority_labels = ['priority: normal', 'medium', 'normal']
-        low_priority_labels = ['priority: low', 'minor', 'low']
-
-        issue['high_priority_label'] = int(any(label in labels for label in high_priority_labels))
-        issue['medium_priority_label'] = int(any(label in labels for label in medium_priority_labels))
-        issue['low_priority_label'] = int(any(label in labels for label in low_priority_labels))
-
-
-def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues=5000):
+def fetch_issues(repo_owner, repo_name, state='all', per_page=100, max_issues=5000):
     base_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
-    # start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
     params = {
         'state': state,
         'per_page': per_page,
         'page': 1
     }
     headers = {
-        'Authorization': f'token {access_token}'  # Include your access token
+        'Authorization': f'token {access_token}'
     }
     issues = []
     issues_saved = 0
@@ -135,7 +127,7 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues
                     print(f"Saved {issues_saved} issues so far.")
 
                 if 'rel="next"' not in response.headers.get('Link', '') or issues_saved == max_issues:
-                    break  # No more pages to fetch or reached the desired number of issues
+                    break
             params['page'] += 1
         else:
             print(f"Failed to retrieve issues. Status code: {response.status_code}")
@@ -143,29 +135,51 @@ def fetch_issues(repo_owner, repo_name, state='closed', per_page=100, max_issues
 
     calculate_comment_priority(issues)
     calculate_top_labels(issues)
-    label_encode_priority(issues)
-
-    # Filter issues with assignee_count > 0, label_count > 0, and closed issues with PR association.
-    issues = [issue for issue in issues if issue['label_count'] > 0 and issue['pr_associated'] in [0, 1]]
-
-    # Clean the data for closed issues
-    for issue in issues:
-        clean_data(issue)
-
     return issues
 
 if __name__ == "__main__":
-    repo_owner = 'opencv'
-    repo_name = 'opencv'
-    max_issues = 5000
-    closed_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues)
+    include_priority_labels = [
+   'p0','p1','p2',
+    'P0','P1','P2',
+    'P3',
+    'P1.5'
+    ]   
+    repos = [
+        ('aws','aws-cdk',['p0','p1','p2']),
+        
+    ]
 
-    # Create a DataFrame from the cleaned closed issues
-    df = pd.DataFrame(closed_issues)
+    max_issues_per_repo = 5000
+    combined_issues = []
 
-    # Export the DataFrame to an Excel file
-    excel_file = 'opencv2_closed_issues_modified.xlsx'
+    label_mapping = {
+          1: [
+            'p0', #1
+            'P0', #2
+            'P1.5' #3
+        ],
+        2: [
+           'p1', #1
+            'P1' #2
+        ],
+        3: [
+            'p2', #1
+            'P2', #2
+            'P3' #3
+        ]
+    }
+
+    for repo_owner, repo_name, labels in repos:
+        print(f"Fetching issues from {repo_owner}/{repo_name}")
+        fetched_issues = fetch_issues(repo_owner, repo_name, max_issues=max_issues_per_repo)
+        filtered_issues = consolidate_priority(fetched_issues, label_mapping, include_priority_labels)
+        combined_issues.extend(filtered_issues)
+        print(f"Fetched {len(filtered_issues)} issues from {repo_owner}/{repo_name}")
+
+    df = pd.DataFrame(combined_issues)
+
+    excel_file = 'extra4.xlsx'
     df.to_excel(excel_file, index=False)
 
-    print(f"Total closed issues: {len(closed_issues)}")
+    print(f"Total issues collected: {len(combined_issues)}")
     print(f"Data exported to {excel_file}")
